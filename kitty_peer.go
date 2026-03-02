@@ -31,6 +31,7 @@ type ServerConnection struct {
 func (node *BullyNode) Reply(receivedMessage *string, reply *string) error {
 	//incoming_message := *receivedMessage
 	*reply = fmt.Sprintf("'hello from node %d back!'", node.selfID) //reply with echo of the receiver's id
+	fmt.Printf("\n%s replied: %s\n", time.Now().String(), *reply)
 	return nil
 }
 
@@ -39,13 +40,13 @@ func (node *BullyNode) SendMessage() {
 	message := fmt.Sprintf("hello from node %d", node.selfID)
 	var reply string
 
-	fmt.Printf("\nmessaging the next node: '%s'", message)
+	fmt.Printf("\n%s messaging the next node: '%s'", time.Now().String(), message)
 	err := node.nextNode.rpcConnection.Call("BullyNode.Reply", &message, &reply)
 	if err != nil {
 		log.Println("call error:", err)
 		return
 	}
-	fmt.Printf("\nreceived reply: %s\n", reply)
+	//fmt.Printf("\nreceived reply: %s\n", reply)
 }
 
 // -----------------------------------------------------------------------------
@@ -104,7 +105,7 @@ func main() {
 
 	rpc.HandleHTTP()
 	go http.ListenAndServe(node.myPort, nil)
-	log.Printf("serving rpc on port" + node.myPort)
+	log.Printf("\nServing rpc on port " + node.myPort)
 
 	// fmt.Println("index stopped at ", index)
 
@@ -133,10 +134,11 @@ func main() {
 	fmt.Println("Connected to " + strNextNode)
 
 	//CALLING THE MESSAGE FUNCTION (RPC)
-	//"messaging" the next node (since we already connected to the next server)
-
-	var wg sync.WaitGroup //test to see what happens when call message directly
+	var wg sync.WaitGroup //call messages as separate threads
 	wg.Add(1)
-	node.SendMessage() //message the next node?
+	go node.SendMessage() //message the next node
+
+	wg.Add(1)
+	go node.SendMessage() //send another message
 	wg.Wait()
 }
