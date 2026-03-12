@@ -34,7 +34,7 @@ type ServerConnection struct {
 //SERVER FUNCTION (RECEIEVE NEW LEADER)
 func (node *BullyNode) ReceiveNewLeader(receivedID *int, reply *string) error {
 	node.leaderID = *receivedID
-	*reply = fmt.Sprintf(" 'node %d has accepted leader %d' ", node.selfID, *receivedID)
+	*reply = fmt.Sprintf("node %d has accepted leader %d", node.selfID, *receivedID)
 	return nil
 }
 
@@ -60,7 +60,7 @@ func (node *BullyNode) BeginElection(wg *sync.WaitGroup) {
 			return
 		}
 		if response == true{ //if ANY responds true, give up
-			fmt.Printf("\nreceived reply from node %d: %t\n", currID, response)
+			fmt.Printf("\nReceived reply from node %d: %t\n", currID, response)
 			node.higherNodeResponded = true
 			break //give up
 		}
@@ -79,6 +79,7 @@ func (node *BullyNode) ElectSelf() { //wg *sync.WaitGroup
 			log.Println("error receiving election:", err)
 			return
 		}
+		fmt.Printf("\nReceived reply: ", reply)
 	}
 }
 
@@ -158,7 +159,7 @@ func main() {
 		node.serverConnections[idx] = ServerConnection{idx, address, client} //ID = index in lines = position in cluster.txt
 		fmt.Printf("\nConnected to peer %d at %s\n", idx, address)
 	}
-	
+
 	if node.nominatedSelf == true{
 		node.BeginElection(&wg)
 	}
