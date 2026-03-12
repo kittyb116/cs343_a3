@@ -20,9 +20,8 @@ type BullyNode struct {
 	higherNodeResponded   bool
 	totalNodes int
 	nominatedSelf bool //determine whether node will start an election
+	serverConnections map[int]ServerConnection //key = ID
 	electionTimeout *time.Timer
-	lines []string
-	nextNode ServerConnection
 }
 
 // ServerConnection represents a connection to another node in the cluster.
@@ -51,31 +50,17 @@ func (node* BullyNode) ReceiveLowerID(receivedID int, reply *bool) error {
 //LOCAL CLIENT FUNCTION (CALLS THE SERVER FUNCTIONS FROM OTHER NODES)
 func (node *BullyNode) BeginElection(wg *sync.WaitGroup) {
 	//TOOD: Make a waitgroup
-	//iterate through all higher-ID peers
-	for i := node.selfID+1; i < node.totalNodes; i++ { //index = total number of ports = len(lines)
-		var strNextNode = node.lines[i]
-
-		//CONNECTION ATTEMPT START
-		client, err := rpc.DialHTTP("tcp", strNextNode) // Attempt to connect to the other server node
-		for err != nil { 		// If connection is not established
-			log.Println("Trying again. Error: ", err)
-			time.Sleep(1 * time.Second)
-			client, err = rpc.DialHTTP("tcp", strNextNode)
-		}
-		// Once connection is established, save connection information in nextNode
-		node.nextNode = ServerConnection{i, strNextNode, client} //i is next node ID
-		fmt.Printf("\nConnected to peer %d at %s\n", i, strNextNode)
-		//CONNECTION ATTEMPT END
-
+	for currID := node.selfID+1; currID < node.totalNodes; currID++ { //iterate through all higher-ID peers
+		conn := node.serverConnections[currID] //look up ServerConnection of ID
 		//TODO: WRAP IN A GO FUNCTION (THREAD)
 		var response bool
-		err = node.nextNode.rpcConnection.Call("BullyNode.ReceiveLowerID", &node.selfID, &response)
+		err := conn.rpcConnection.Call("BullyNode.ReceiveLowerID", &node.selfID, &response)
 		if err != nil {
 			log.Println("call error:", err)
 			return
 		}
 		if response == true{ //if ANY responds true, give up
-			fmt.Printf("\nreceived reply from node %d: %t\n", i, response)
+			fmt.Printf("\nreceived reply from node %d: %t\n", currID, response)
 			node.higherNodeResponded = true
 			break //give up
 		}
@@ -86,23 +71,10 @@ func (node *BullyNode) BeginElection(wg *sync.WaitGroup) {
 //LOCAL CLIENT FUNCTION (CALLS RECEIVENEWLEADER FROM ALL NODES)
 func (node *BullyNode) ElectSelf() { //wg *sync.WaitGroup
 	node.leaderID = node.selfID
-	for i := 0; i < node.totalNodes; i++ {
-		if i == node.selfID{
-			continue
-		}
-		var strNextNode = node.lines[i]
-		//wg.Add(1)
-		client, err := rpc.DialHTTP("tcp", strNextNode) // Attempt to connect to the other server node
-		for err != nil { 		// If connection is not established
-			log.Println("Trying again. Error: ", err)
-			time.Sleep(1 * time.Second)
-			client, err = rpc.DialHTTP("tcp", strNextNode)
-		}
-		node.nextNode = ServerConnection{i, strNextNode, client} //i is next node ID
-		fmt.Printf("\nConnected to peer %d at %s\n", i, strNextNode)
+	for ID, conn := range node.serverConnections{ //conn = ServerConnection for this ID (in serverConnections map)
 		var reply string
-		fmt.Printf("\nNotifying peer %d of leader status\n", i)
-		err = node.nextNode.rpcConnection.Call("BullyNode.ReceiveNewLeader", &node.selfID, &reply)
+		fmt.Printf("\nNotifying peer %d of new leader\n", ID)
+		err := conn.rpcConnection.Call("BullyNode.ReceiveNewLeader", &node.selfID, &reply)
 		if err != nil {
 			log.Println("error receiving election:", err)
 			return
@@ -133,26 +105,21 @@ func main() {
 
 	node := &BullyNode{
 		selfID:   myID,
-		nextNode: ServerConnection{},
 		higherNodeResponded: false,
 		nominatedSelf: false,
 	}
 
 	// --- Read the IP:port info from the cluster configuration file
 	scanner := bufio.NewScanner(file)
-	//lines := make([]string, 0)
 	node.totalNodes = 0
-	//index := 0
+	lines := []string{}
 	for scanner.Scan() {
-		// Get server IP:port
-		text := scanner.Text()
-		log.Printf(text, node.totalNodes)
+		text := scanner.Text() // Get server IP:port
+		log.Printf("text: %s, totalNodes: %d", text, node.totalNodes) 
 		if node.totalNodes == myID {
 			node.myPort = text //save port in cluster.txt to "myPort" of current node
-			//index++
-			//continue
 		}
-		node.lines = append(node.lines, text) //modified lines: append all ports
+		lines = append(lines, text)
 		node.totalNodes++
 	}
 	// If anything wrong happens with reading the file, simply exit
@@ -175,6 +142,23 @@ func main() {
 
 	time.Sleep(5 * time.Second) //option to make sleep timer so nodes connect after a second
 
+	//CONNECT TO ALL OTHER NODES AND SAVE
+	node.serverConnections = make(map[int]ServerConnection)
+
+	for idx, address := range lines{
+		if idx == node.selfID{
+			continue //skip self
+		}
+		client, err := rpc.DialHTTP("tcp", address) // Attempt to connect to the other server node
+		for err != nil { 		// If connection is not established
+			log.Println("Trying again. Error: ", err)
+			time.Sleep(1 * time.Second)
+			client, err = rpc.DialHTTP("tcp", address)
+		}
+		node.serverConnections[idx] = ServerConnection{idx, address, client} //ID = index in lines = position in cluster.txt
+		fmt.Printf("\nConnected to peer %d at %s\n", idx, address)
+	}
+	
 	if node.nominatedSelf == true{
 		node.BeginElection(&wg)
 	}
