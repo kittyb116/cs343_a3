@@ -21,7 +21,8 @@ type BullyNode struct {
 	totalNodes int
 	nominatedSelf bool //determine whether node will start an election
 	serverConnections map[int]ServerConnection //key = ID
-	electionTimeout *time.Timer
+	mu sync.Mutex
+	//electionTimeout *time.Timer
 }
 
 // ServerConnection represents a connection to another node in the cluster.
@@ -43,7 +44,9 @@ func (node *BullyNode) ReceiveNewLeader(receivedID *int, reply *string) error {
 func (node* BullyNode) ReceiveLowerID(receivedID int, reply *bool) error {
 	if node.selfID > receivedID{
 		*reply = true
+		node.mu.Lock()
 		node.nominatedSelf = true
+		node.mu.Unlock()
 	}
 	return nil
 }
@@ -68,7 +71,9 @@ func (node *BullyNode) BeginElection() { //wg *sync.WaitGroup
 			}
 			if response == true{ //if ANY responds true, give up
 				fmt.Printf("\nReceived reply from node %d: %t\n", id, response)
+				node.mu.Lock()
 				node.higherNodeResponded = true
+				node.mu.Unlock()
 				return //give up
 			}
 		}(currID)
@@ -83,10 +88,10 @@ func (node *BullyNode) ElectSelf() { //wg *sync.WaitGroup
 	var wg sync.WaitGroup
 	fmt.Println("started new electSelf")
 	for ID, conn := range node.serverConnections{ //conn = ServerConnection for this ID (in serverConnections map)
-		var reply string
 		fmt.Printf("\nNotifying peer %d of new leader\n", ID)
 		wg.Add(1)
 		go func(c ServerConnection){ //notify each node in a new goroutine
+			var reply string
 			defer wg.Done()
 			err := c.rpcConnection.Call("BullyNode.ReceiveNewLeader", &node.selfID, &reply)
 			if err != nil {
@@ -132,8 +137,7 @@ func main() {
 	lines := []string{}
 	for scanner.Scan() {
 		text := scanner.Text() // Get server IP:port
-		log.Printf("text: %s, totalNodes: %d", text, node.totalNodes) 
-		if node.totalNodes == myID {
+		if node.totalNodes == myID { //if "nodes so far" = myID, then current ID = myID
 			node.myPort = text
 		}
 		lines = append(lines, text)
