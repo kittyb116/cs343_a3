@@ -34,7 +34,8 @@ type ServerConnection struct {
 //SERVER FUNCTION (RECEIEVE NEW LEADER)
 func (node *BullyNode) ReceiveNewLeader(receivedID *int, reply *string) error {
 	node.leaderID = *receivedID
-	*reply = fmt.Sprintf("node %d has accepted leader %d", node.selfID, *receivedID)
+	fmt.Printf("\nreceived leader: node %d\n", *receivedID)
+	*reply = fmt.Sprintf("\nnode %d has accepted leader %d\n", node.selfID, *receivedID)
 	return nil
 }
 
@@ -48,39 +49,55 @@ func (node* BullyNode) ReceiveLowerID(receivedID int, reply *bool) error {
 }
 
 //LOCAL CLIENT FUNCTION (CALLS THE SERVER FUNCTIONS FROM OTHER NODES)
-func (node *BullyNode) BeginElection(wg *sync.WaitGroup) {
-	//TOOD: Make a waitgroup
+func (node *BullyNode) BeginElection() { //wg *sync.WaitGroup
+	var wg sync.WaitGroup
+	fmt.Println("started new BeginElection")
 	for currID := node.selfID+1; currID < node.totalNodes; currID++ { //iterate through all higher-ID peers
+		fmt.Printf("\ncurrID: %d\n", currID)
 		conn := node.serverConnections[currID] //look up ServerConnection of ID
-		//TODO: WRAP IN A GO FUNCTION (THREAD)
-		var response bool
-		err := conn.rpcConnection.Call("BullyNode.ReceiveLowerID", &node.selfID, &response)
-		if err != nil {
-			log.Println("call error:", err)
-			return
-		}
-		if response == true{ //if ANY responds true, give up
-			fmt.Printf("\nReceived reply from node %d: %t\n", currID, response)
-			node.higherNodeResponded = true
-			break //give up
-		}
+		fmt.Printf("\nconnected to node %d!\n", currID)
+		wg.Add(1)
+		fmt.Printf("\nstarting new thread for %d\n", currID)
+		go func(id int){ //create go function (thread) for each node message
+			defer wg.Done()
+			var response bool
+			err := conn.rpcConnection.Call("BullyNode.ReceiveLowerID", &node.selfID, &response)
+			if err != nil {
+				log.Println("call error:", err)
+				return
+			}
+			if response == true{ //if ANY responds true, give up
+				fmt.Printf("\nReceived reply from node %d: %t\n", id, response)
+				node.higherNodeResponded = true
+				return //give up
+			}
+		}(currID)
+		fmt.Printf("\nfinished thread for %d\n", currID)
 	}
-	wg.Wait()
+	wg.Wait() //end function when all messages are done
 }
 
 //LOCAL CLIENT FUNCTION (CALLS RECEIVENEWLEADER FROM ALL NODES)
 func (node *BullyNode) ElectSelf() { //wg *sync.WaitGroup
 	node.leaderID = node.selfID
+	var wg sync.WaitGroup
+	fmt.Println("started new electSelf")
 	for ID, conn := range node.serverConnections{ //conn = ServerConnection for this ID (in serverConnections map)
 		var reply string
 		fmt.Printf("\nNotifying peer %d of new leader\n", ID)
-		err := conn.rpcConnection.Call("BullyNode.ReceiveNewLeader", &node.selfID, &reply)
-		if err != nil {
-			log.Println("error receiving election:", err)
-			return
-		}
-		fmt.Printf("\nReceived reply: %s", reply)
+		wg.Add(1)
+		go func(c ServerConnection){ //notify each node in a new goroutine
+			defer wg.Done()
+			err := c.rpcConnection.Call("BullyNode.ReceiveNewLeader", &node.selfID, &reply)
+			if err != nil {
+				log.Println("error receiving election:", err)
+				return
+			}
+			fmt.Printf("\nReceived reply: %s", reply)
+		}(conn)
 	}
+	wg.Wait()
+	fmt.Println("completed this electSelf")
 }
 
 // -----------------------------------------------------------------------------
@@ -133,11 +150,10 @@ func main() {
 		log.Fatal("Error registering the RPCs", err)
 	}
 
-	var wg sync.WaitGroup //create separate threads for server + client
+	//var wg sync.WaitGroup //create separate threads for server + client
 
 	rpc.HandleHTTP()
 	go http.ListenAndServe(node.myPort, nil)
-	//defer wg.Done()
 	log.Printf("\nServing rpc on port " + node.myPort)
 
 	time.Sleep(5 * time.Second) //option to make sleep timer so nodes connect after a second
@@ -166,10 +182,10 @@ func main() {
 
 		for range ticker.C{
 			if node.nominatedSelf == true{
-				fmt.Sprintf("\node %d: nominatedSelf = true!\n", node.selfID)
+				fmt.Printf("\node %d: nominatedSelf = true!\n", node.selfID)
 				node.nominatedSelf = false
 				node.higherNodeResponded = false //reset everything
-				node.BeginElection(&wg)
+				node.BeginElection()
 				if node.higherNodeResponded == false {
 					node.ElectSelf()
 				}
@@ -179,14 +195,14 @@ func main() {
 
 	//trigger election on input
 	scanner1 := bufio.NewScanner(os.Stdin)
-	fmt.Printf("Type y to begin leader election.")
+	fmt.Println("Type y to begin leader election.")
 	scanner1.Scan()
 	input := scanner1.Text()
 
 	if input == "y" {
 		node.nominatedSelf = false
 		node.higherNodeResponded = false //reset all the statuses
-		node.BeginElection(&wg)
+		node.BeginElection()
 		if node.higherNodeResponded == false {
 			node.ElectSelf()
 		}
