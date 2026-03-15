@@ -79,7 +79,7 @@ func (node *BullyNode) ElectSelf() { //wg *sync.WaitGroup
 			log.Println("error receiving election:", err)
 			return
 		}
-		fmt.Printf("\nReceived reply: ", reply)
+		fmt.Printf("\nReceived reply: %s", reply)
 	}
 }
 
@@ -93,7 +93,6 @@ func main() {
 		return
 	}
 
-	// --- Read the values sent in the command line
 	// Get this server's ID (same as its index for simplicity)
 	myID, _ := strconv.Atoi(arguments[1])
 
@@ -110,15 +109,15 @@ func main() {
 		nominatedSelf: false,
 	}
 
-	// --- Read the IP:port info from the cluster configuration file
-	scanner := bufio.NewScanner(file)
+	// Read the IP:port info from the cluster configuration file
+	scanner := bufio.NewScanner(file) 
 	node.totalNodes = 0
 	lines := []string{}
 	for scanner.Scan() {
 		text := scanner.Text() // Get server IP:port
 		log.Printf("text: %s, totalNodes: %d", text, node.totalNodes) 
 		if node.totalNodes == myID {
-			node.myPort = text //save port in cluster.txt to "myPort" of current node
+			node.myPort = text
 		}
 		lines = append(lines, text)
 		node.totalNodes++
@@ -128,7 +127,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// --- Register the RPCs of this object of type BullyNode
+	// Register the RPCs of this object of type BullyNode
 	err = rpc.Register(node)
 	if err != nil {
 		log.Fatal("Error registering the RPCs", err)
@@ -143,7 +142,7 @@ func main() {
 
 	time.Sleep(5 * time.Second) //option to make sleep timer so nodes connect after a second
 
-	//CONNECT TO ALL OTHER NODES AND SAVE
+	//Connect to all other nodes and save Routes
 	node.serverConnections = make(map[int]ServerConnection)
 
 	for idx, address := range lines{
@@ -160,10 +159,24 @@ func main() {
 		fmt.Printf("\nConnected to peer %d at %s\n", idx, address)
 	}
 
-	if node.nominatedSelf == true{
-		node.BeginElection(&wg)
-	}
-	
+	//Ticker to track nominatedSelf
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for range ticker.C{
+			if node.nominatedSelf == true{
+				fmt.Sprintf("\node %d: nominatedSelf = true!\n", node.selfID)
+				node.nominatedSelf = false
+				node.higherNodeResponded = false //reset everything
+				node.BeginElection(&wg)
+				if node.higherNodeResponded == false {
+					node.ElectSelf()
+				}
+			}
+		}
+	}()
+
 	//trigger election on input
 	scanner1 := bufio.NewScanner(os.Stdin)
 	fmt.Printf("Type y to begin leader election.")
@@ -171,11 +184,13 @@ func main() {
 	input := scanner1.Text()
 
 	if input == "y" {
+		node.nominatedSelf = false
+		node.higherNodeResponded = false //reset all the statuses
 		node.BeginElection(&wg)
 		if node.higherNodeResponded == false {
 			node.ElectSelf()
-		} else{
-			return
 		}
 	}
+
+	select{}
 }	
