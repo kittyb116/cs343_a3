@@ -35,14 +35,15 @@ type ServerConnection struct {
 //SERVER FUNCTION (RECEIEVE NEW LEADER)
 func (node *BullyNode) ReceiveNewLeader(receivedID *int, reply *string) error {
 	node.leaderID = *receivedID
-	fmt.Printf("\nreceived leader: node %d\n", *receivedID)
-	*reply = fmt.Sprintf("\nnode %d has accepted leader %d\n", node.selfID, *receivedID)
+	fmt.Printf("\n[%s] Received leader: node %d\n", time.Now().Format("15:04:05.000000"), *receivedID) //TODO: nanoseconds
+	*reply = fmt.Sprintf("\n[%s] Node %d has accepted leader %d\n", time.Now().Format("15:04:05.000000"), node.selfID, *receivedID)
 	return nil
 }
 
 //REPLY WITH HIGHERNODERESPONDED VALUE (TRUE OR FALSE)
-func (node* BullyNode) ReceiveLowerID(receivedID int, reply *bool) error {
-	if node.selfID > receivedID{
+func (node* BullyNode) ReceiveLowerID(receivedID *int, reply *bool) error {
+	fmt.Printf("\n[%s] Received lower ID: %d\n", time.Now().Format("15:04:05.000000"), *receivedID)
+	if node.selfID > *receivedID{
 		*reply = true
 		node.mu.Lock()
 		node.nominatedSelf = true
@@ -54,30 +55,30 @@ func (node* BullyNode) ReceiveLowerID(receivedID int, reply *bool) error {
 //LOCAL CLIENT FUNCTION (CALLS THE SERVER FUNCTIONS FROM OTHER NODES)
 func (node *BullyNode) BeginElection() { //wg *sync.WaitGroup
 	var wg sync.WaitGroup
-	fmt.Println("started new BeginElection")
+	fmt.Println("Started new BeginElection")
 	for currID := node.selfID+1; currID < node.totalNodes; currID++ { //iterate through all higher-ID peers
-		fmt.Printf("\ncurrID: %d\n", currID)
+		fmt.Printf("\nCurrID: %d\n", currID)
 		conn := node.serverConnections[currID] //look up ServerConnection of ID
-		fmt.Printf("\nconnected to node %d!\n", currID)
+		//fmt.Printf("\n[%s] Connected to node %d!\n", time.Now().Format("15:04:05.000000"), currID)
 		wg.Add(1)
-		fmt.Printf("\nstarting new thread for %d\n", currID)
+		//fmt.Printf("\n[%s] Starting new thread for %d\n", time.Now().Format("15:04:05.000000"), currID)
 		go func(id int){ //create go function (thread) for each node message
 			defer wg.Done()
 			var response bool
 			err := conn.rpcConnection.Call("BullyNode.ReceiveLowerID", &node.selfID, &response)
 			if err != nil {
-				log.Println("call error:", err)
+				log.Println("Call error:", err)
 				return
 			}
 			if response == true{ //if ANY responds true, give up
-				fmt.Printf("\nReceived reply from node %d: %t\n", id, response)
+				fmt.Printf("\n[%s] Received reply from node %d: %t\n", time.Now().Format("15:04:05.000000"), id, response)
 				node.mu.Lock()
 				node.higherNodeResponded = true
 				node.mu.Unlock()
 				return //give up
 			}
 		}(currID)
-		fmt.Printf("\nfinished thread for %d\n", currID)
+		//fmt.Printf("\n[%s] Finished thread for %d\n", time.Now().Format("15:04:05.000000"), currID)
 	}
 	wg.Wait() //end function when all messages are done
 }
@@ -86,23 +87,23 @@ func (node *BullyNode) BeginElection() { //wg *sync.WaitGroup
 func (node *BullyNode) ElectSelf() { //wg *sync.WaitGroup
 	node.leaderID = node.selfID
 	var wg sync.WaitGroup
-	fmt.Println("started new electSelf")
+	fmt.Printf("\n[%s] Started new electSelf\n", time.Now().Format("15:04:05.000000"))
 	for ID, conn := range node.serverConnections{ //conn = ServerConnection for this ID (in serverConnections map)
-		fmt.Printf("\nNotifying peer %d of new leader\n", ID)
+		fmt.Printf("\n[%s] Notifying peer %d of new leader\n", time.Now().Format("15:04:05.000000"), ID)
 		wg.Add(1)
 		go func(c ServerConnection){ //notify each node in a new goroutine
 			var reply string
 			defer wg.Done()
 			err := c.rpcConnection.Call("BullyNode.ReceiveNewLeader", &node.selfID, &reply)
 			if err != nil {
-				log.Println("error receiving election:", err)
+				log.Println("Error receiving election:", err)
 				return
 			}
-			fmt.Printf("\nReceived reply: %s", reply)
+			fmt.Printf("\n[%s] Received reply: %s", time.Now().Format("15:04:05.000000"), reply)
 		}(conn)
 	}
 	wg.Wait()
-	fmt.Println("completed this electSelf")
+	fmt.Printf("\n[%s] Completed this electSelf\n", time.Now().Format("15:04:05.000000"))
 }
 
 // -----------------------------------------------------------------------------
@@ -186,9 +187,11 @@ func main() {
 
 		for range ticker.C{
 			if node.nominatedSelf == true{
-				fmt.Printf("\node %d: nominatedSelf = true!\n", node.selfID)
+				fmt.Printf("\n[%s] Node %d: nominatedSelf = true!\n", time.Now().Format("15:04:05.000000"), node.selfID)
+				node.mu.Lock() //lock nominatedSelf and higherNodeResponded while editing them
 				node.nominatedSelf = false
 				node.higherNodeResponded = false //reset everything
+				node.mu.Unlock()
 				node.BeginElection()
 				if node.higherNodeResponded == false {
 					node.ElectSelf()
@@ -204,8 +207,10 @@ func main() {
 	input := scanner1.Text()
 
 	if input == "y" {
+		node.mu.Lock() //lock nominatedSelf, higherNodeResponded while editing them
 		node.nominatedSelf = false
 		node.higherNodeResponded = false //reset all the statuses
+		node.mu.Unlock()
 		node.BeginElection()
 		if node.higherNodeResponded == false {
 			node.ElectSelf()
