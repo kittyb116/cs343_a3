@@ -63,7 +63,7 @@ func (node *BullyNode) BeginElection() { //wg *sync.WaitGroup
 		//fmt.Printf("\n[%s] Connected to node %d!\n", time.Now().Format("15:04:05.000000"), currID)
 		wg.Add(1)
 		//fmt.Printf("\n[%s] Starting new thread for %d\n", time.Now().Format("15:04:05.000000"), currID)
-		go func(id int){ //create go function (thread) for each node message
+		go func(id int){ //async: create goroutine for each node message
 			defer wg.Done()
 			var response bool
 			err := conn.rpcConnection.Call("BullyNode.ReceiveLowerID", &node.selfID, &response)
@@ -87,12 +87,12 @@ func (node *BullyNode) BeginElection() { //wg *sync.WaitGroup
 //LOCAL CLIENT FUNCTION (CALLS RECEIVENEWLEADER FROM ALL NODES)
 func (node *BullyNode) ElectSelf() { //wg *sync.WaitGroup
 	node.leaderID = node.selfID
-	var wg sync.WaitGroup
+	var wg sync.WaitGroup //asynchronous messaging
 	fmt.Printf("\n[%s] Started new electSelf\n", time.Now().Format("15:04:05.000000"))
 	for ID, conn := range node.serverConnections{ //conn = ServerConnection for this ID (in serverConnections map)
 		fmt.Printf("\n[%s] Notifying peer %d of new leader\n", time.Now().Format("15:04:05.000000"), ID)
 		wg.Add(1)
-		go func(c ServerConnection){ //notify each node in a new goroutine
+		go func(c ServerConnection){ //async: notify each node in a new goroutine
 			var reply string
 			defer wg.Done()
 			err := c.rpcConnection.Call("BullyNode.ReceiveNewLeader", &node.selfID, &reply)
