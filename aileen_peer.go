@@ -35,6 +35,7 @@ type ServerConnection struct {
 //SERVER FUNCTION (RECEIEVE NEW LEADER)
 func (node *BullyNode) ReceiveNewLeader(receivedID *int, reply *string) error {
 	node.leaderID = *receivedID
+	node.nominatedSelf = false //no longer a candidate b/c accepted new leader
 	fmt.Printf("\n[%s] Received leader: node %d\n", time.Now().Format("15:04:05.000000"), *receivedID) //TODO: nanoseconds
 	*reply = fmt.Sprintf("\n[%s] Node %d has accepted leader %d\n", time.Now().Format("15:04:05.000000"), node.selfID, *receivedID)
 	return nil
@@ -57,7 +58,7 @@ func (node *BullyNode) BeginElection() { //wg *sync.WaitGroup
 	var wg sync.WaitGroup
 	fmt.Println("Started new BeginElection")
 	for currID := node.selfID+1; currID < node.totalNodes; currID++ { //iterate through all higher-ID peers
-		fmt.Printf("\nCurrID: %d\n", currID)
+		//fmt.Printf("\nCurrID: %d\n", currID)
 		conn := node.serverConnections[currID] //look up ServerConnection of ID
 		//fmt.Printf("\n[%s] Connected to node %d!\n", time.Now().Format("15:04:05.000000"), currID)
 		wg.Add(1)
@@ -189,8 +190,8 @@ func main() {
 			if node.nominatedSelf == true{
 				fmt.Printf("\n[%s] Node %d: nominatedSelf = true!\n", time.Now().Format("15:04:05.000000"), node.selfID)
 				node.mu.Lock() //lock nominatedSelf and higherNodeResponded while editing them
-				node.nominatedSelf = false
-				node.higherNodeResponded = false //reset everything
+				node.nominatedSelf = false //reset everything
+				node.higherNodeResponded = false 
 				node.mu.Unlock()
 				node.BeginElection()
 				if node.higherNodeResponded == false {
